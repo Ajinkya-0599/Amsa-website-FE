@@ -127,4 +127,3 @@ EOF
           # --- Reload Nginx ---
           sudo nginx -t
           sudo systemctl reload nginx
-   
