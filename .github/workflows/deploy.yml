@@ -96,34 +96,4 @@ jobs:
           pm2 restart amsa-backend || pm2 start server.js --name amsa-backend --watch
           pm2 save
 
-          # --- Nginx Config ---
-          if [ ! -f "/etc/nginx/sites-available/amsa" ]; then
-            sudo tee /etc/nginx/sites-available/amsa > /dev/null <<'EOF'
-         server {
-         listen 80;
-         server_name _;
-
-         root /var/www/amsa-fe;
-         index index.html;
-
-         location / {
-         try_files \$uri /index.html;
-        }
-
-        location /api {
-        proxy_pass http://localhost:3001;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host \$host;
-        proxy_cache_bypass \$http_upgrade;
-      }
-    }
-    EOF
-            sudo ln -sf /etc/nginx/sites-available/amsa /etc/nginx/sites-enabled/
-            sudo rm -f /etc/nginx/sites-enabled/default
-          fi
-
-          # --- Reload Nginx ---
-          sudo nginx -t
-          sudo systemctl reload nginx
+  
