@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # -------------------------------
+    # Checkout frontend & backend
+    # -------------------------------
     - name: Checkout Frontend
       uses: actions/checkout@v3
       with:
@@ -22,22 +25,34 @@ jobs:
         repository: 'prathamesh0413/Amsa-website-BE'
         path: backend
 
+    # -------------------------------
+    # Setup Node.js for build
+    # -------------------------------
     - name: Setup Node.js
       uses: actions/setup-node@v3
       with:
         node-version: '18'
 
+    # -------------------------------
+    # Build Frontend
+    # -------------------------------
     - name: Build Frontend
       working-directory: frontend
       run: |
         npm install
         npm run build
-        npm run export || true   # static export if available
+        npm run export || true
 
+    # -------------------------------
+    # Build Backend
+    # -------------------------------
     - name: Build Backend
       working-directory: backend
       run: npm install
 
+    # -------------------------------
+    # Deploy Everything to EC2
+    # -------------------------------
     - name: Deploy to EC2
       uses: appleboy/ssh-action@v0.1.6
       with:
@@ -46,19 +61,27 @@ jobs:
         key: ${{ secrets.EC2_SSH_KEY }}
         port: 22
         script: |
-          # Clone repositories if not present
+          # --- System Update (run once) ---
+          sudo apt update && sudo apt upgrade -y
+          sudo apt install -y git nginx curl
+          curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          sudo npm install -g pm2 serve
+
+          # --- Clone repos if missing ---
           if [ ! -d "/home/ubuntu/Amsa-website-FE" ]; then
             git clone https://github.com/prathamesh0413/Amsa-website-FE.git /home/ubuntu/Amsa-website-FE
           fi
+
           if [ ! -d "/home/ubuntu/Amsa-website-BE" ]; then
             git clone https://github.com/prathamesh0413/Amsa-website-BE.git /home/ubuntu/Amsa-website-BE
           fi
 
-          # Pull latest changes
+          # --- Pull latest code ---
           cd /home/ubuntu/Amsa-website-FE && git pull origin main
           cd /home/ubuntu/Amsa-website-BE && git pull origin main
 
-          # --- Frontend setup (Next.js static build for Nginx) ---
+          # --- Frontend Build & Deploy ---
           cd /home/ubuntu/Amsa-website-FE
           npm install
           npm run build
@@ -67,11 +90,40 @@ jobs:
           sudo mkdir -p /var/www/amsa-fe
           sudo cp -r out/* /var/www/amsa-fe/
 
-          # --- Backend setup (Node.js API runs on port 3001 via PM2) ---
+          # --- Backend Setup & PM2 ---
           cd /home/ubuntu/Amsa-website-BE
           npm install
           pm2 restart amsa-backend || pm2 start server.js --name amsa-backend --watch
-
-          # --- Reload services ---
-          sudo systemctl reload nginx
           pm2 save
+
+          # --- Nginx Config ---
+          if [ ! -f "/etc/nginx/sites-available/amsa" ]; then
+            sudo tee /etc/nginx/sites-available/amsa > /dev/null <<EOF
+server {
+    listen 80;
+    server_name _;
+
+    root /var/www/amsa-fe;
+    index index.html;
+
+    location / {
+        try_files \$uri /index.html;
+    }
+
+    location /api {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+    }
+}
+EOF
+            sudo ln -sf /etc/nginx/sites-available/amsa /etc/nginx/sites-enabled/
+            sudo rm -f /etc/nginx/sites-enabled/default
+          fi
+
+          # --- Reload Nginx ---
+          sudo nginx -t
+          sudo systemctl reload nginx
